@@ -14,9 +14,7 @@ library(ggpubr)
 
 set.seed(123)
 
-#heart <- read_csv("C:/Users/simos/Google Drive/Università/IV anno/Machine learning/Machine learning 20-21/Progetto/heart_failure_clinical_records_dataset.csv")
-
-heart <- read_csv("G:/Il mio Drive/Progetto ML/heart_failure_clinical_records_dataset.csv")
+heart <- read_csv("~/heart_failure_clinical_records_dataset.csv") #set your directory
 
 heart <- data.frame(heart)
 str(heart)
