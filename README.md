@@ -1,4 +1,4 @@
-# Heart desease death prediction
+# Heart failure death prediction
 
 L’insufficienza cardiaca (o scompenso cardiaco) è uno stato in cui i muscoli del cuore si indeboliscono e si ingrossano, limitando la loro capacità di pompare sangue nell’apparato cardiocircolatorio. I ventricoli si irrigidiscono e non riescono a riempirsi in modo corretto; con l’andare del tempo il cuore non riesce più a
 fornire sangue a sufficienza nel corpo e di conseguenza il paziente presenta difficoltà nella respirazione.
