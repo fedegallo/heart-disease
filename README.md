@@ -7,3 +7,7 @@ Il Machine Learning pu`o aiutare ad individuare pattern e correlazioni tra le va
 
 # Dataset
 Disponibile al seguente link: https://archive.ics.uci.edu/ml/datasets/Heart+failure+clinical+records
+
+# Programming language
+
+R
