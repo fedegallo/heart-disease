@@ -1,0 +1,1027 @@
+---
+title: "Insufficienza cardiaca: modelli di ML per la previsione della mortalità"
+author: "Federico Galloni, Simone Scolaro"
+output:
+  html_document:
+    toc: yes
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(GGally)
+library(gridExtra)
+library(ggpubr)
+
+set.seed(123)
+
+#heart <- read_csv("C:/Users/simos/Google Drive/Università/IV anno/Machine learning/Machine learning 20-21/Progetto/heart_failure_clinical_records_dataset.csv")
+
+heart <- read_csv("G:/Il mio Drive/Progetto ML/heart_failure_clinical_records_dataset.csv")
+
+heart <- data.frame(heart)
+str(heart)
+summary(heart)
+anyNA(heart)
+```
+
+
+# Creazione variabili
+
+```{r}
+heart$control_cpk <- ifelse(heart$creatinine_phosphokinase < 10 | heart$creatinine_phosphokinase > 120, 0, 1)
+heart$control_ejection_fraction <- ifelse(heart$ejection_fraction <= 40, 0, 1)
+heart$control_platelets <- ifelse(heart$platelets < 150000 | heart$platelets > 450000, 0, 1)
+heart$control_serum_creatinine <- ifelse(heart$serum_creatinine < 0.7 | heart$serum_creatinine > 1.2, 0, 1)
+heart$control_serum_sodium <- ifelse(heart$serum_sodium < 135 | heart$serum_sodium > 145, 0, 1)
+heart$score_control <- apply(heart[,14:18], 1, sum)
+
+heart$anaemia_s <- ifelse(heart$anaemia == 0, "non anemico", "anemico")
+heart$diabetes_s <- ifelse(heart$diabetes == 0, "non diabetico", "diabetico")
+heart$hbp_s <- ifelse(heart$high_blood_pressure == 0, "non iperteso", "iperteso")
+heart$sex_s <- ifelse(heart$sex == 0, "maschio", "femmina")
+heart$smoking_s <- ifelse(heart$smoking == 0, "non fumatore", "fumatore")
+heart$death_s <- ifelse(heart$DEATH_EVENT == 0, "vivo", "morto")
+
+heart$control_cpk_s <- ifelse(heart$creatinine_phosphokinase < 10 | heart$creatinine_phosphokinase > 120, "cpk out", "cpk in")
+heart$control_ejection_fraction_s <- ifelse(heart$ejection_fraction <= 40, "ef out", "ef in")
+heart$control_platelets_s <- ifelse(heart$platelets < 150000 | heart$platelets > 450000, "platelets out", "platelets in")
+heart$control_serum_creatinine_s <- ifelse(heart$serum_creatinine < 0.7 | heart$serum_creatinine > 1.2, "serum creatinine out", "serum creatinine in")
+heart$control_serum_sodium_s <- ifelse(heart$serum_sodium < 135 | heart$serum_sodium > 145, "serum sodium out", "serum sodium in")
+
+numer <- c(1,3,5,7,8,9,12)
+categ <- c(2,4,6,10,11,13:19)
+categ_s <- c(20:30,19)
+udm <- c("Years",NA,"mcg/L",NA,"%",NA,"kiloplatelets/mL","mg/dL","mEq/L",NA,NA,"Days",rep(NA,7))
+```
+
+
+# Analisi esplorativa univariata
+
+### Variabili categoriche
+
+```{r, out.width='\\textwidth'}
+disegna_barplot <- function(x){
+  ggplot(heart) +
+    geom_bar(mapping = aes(x=heart[,x], y=stat(prop), group=1)) +
+    theme(axis.text.x=element_text(size=6),
+          axis.title.x=element_blank(),
+          plot.title=element_text(hjust = 0.5, size=7.5)) +
+    labs(title=names(heart)[x], y="%")
+}
+
+grafici <- lapply(categ_s, FUN=disegna_barplot)
+
+grid.arrange(grobs=grafici, nrow=4)
+```
+
+### Variabili numeriche
+
+```{r, out.width='\\textwidth'}
+disegna_boxplot <- function(x){
+  ggplot(data = heart) +
+    geom_boxplot(mapping = aes(y=heart[,x]), fill="lightgreen") +
+    theme(axis.title.x=element_blank(),
+          axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(),
+          plot.title=element_text(hjust = 0.5, size=7.5)) +
+    labs(title=names(heart)[x], y=udm[x])
+}
+
+grafici <- lapply(numer, FUN=disegna_boxplot)
+
+grid.arrange(grobs=grafici, nrow=2)
+```
+
+
+# Analisi esplorativa bivariata
+
+### Tabelle di contingenza
+
+```{r}
+for (i in categ[-which(categ==13)]){
+  #print(table(heart[,i],heart$DEATH_EVENT, dnn = c(names(heart)[i],"DEATH_EVENT")))
+  print(prop.table(table(heart[,i],heart$DEATH_EVENT, dnn = c(names(heart)[i],"DEATH_EVENT"))))
+  print(prop.table(table(heart[,i],heart$DEATH_EVENT, dnn = c(names(heart)[i],"DEATH_EVENT")),1))
+}
+
+```
+
+### Distribuzioni numeriche stratificate per evento
+
+```{r, out.width='\\textwidth'}
+p1 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=age, color=death_s), size=1)
+
+p2 <- 
+ggplot(data = filter(heart, creatinine_phosphokinase < 2000)) +
+  geom_density(mapping = aes(x=creatinine_phosphokinase, color=death_s), size=1, trim=T) +
+  geom_vline(aes(xintercept=10)) +
+  geom_vline(aes(xintercept=120))
+
+p3 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=ejection_fraction, color=death_s), size=1) +
+  geom_vline(aes(xintercept=50)) +
+  geom_vline(aes(xintercept=70))
+
+p4 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=platelets, color=death_s), size=1) +
+  geom_vline(aes(xintercept=150000)) +
+  geom_vline(aes(xintercept=450000))
+
+p5 <- 
+ggplot(data = filter(heart, serum_creatinine < 5)) +
+  geom_density(mapping = aes(x=serum_creatinine, color=death_s), size=1) +
+  geom_vline(aes(xintercept=0.7)) +
+  geom_vline(aes(xintercept=1.2))
+
+p6 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=serum_sodium, color=death_s), size=1) +
+  geom_vline(aes(xintercept=135)) +
+  geom_vline(aes(xintercept=145))
+
+p7 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=time, color=death_s), size=1)
+
+ggarrange(p1, p2, p3, p4, ncol=2, nrow=2, common.legend = TRUE, legend="bottom")
+ggarrange(p5, p6, p7, ncol=2, nrow=2, common.legend = TRUE, legend="bottom")
+
+#ggarrange(p1, p2, p3, p4, p5, p6, p7, ncol=2, nrow=4, common.legend = TRUE, legend="bottom")
+
+```
+
+```{r}
+p1 <- 
+ggplot(data = filter(heart, creatinine_phosphokinase < 2000)) +
+  geom_density(mapping = aes(x=creatinine_phosphokinase, color=death_s), size=1, trim=T) +
+  geom_vline(aes(xintercept=10)) +
+  geom_vline(aes(xintercept=120)) +
+  theme(legend.position = "bottom")
+
+p2 <- 
+ggplot(data = heart) +
+  geom_density(mapping = aes(x=ejection_fraction, color=death_s), size=1) +
+  geom_vline(aes(xintercept=50)) +
+  geom_vline(aes(xintercept=70)) +
+  theme(legend.position = "bottom")
+
+ggarrange(p1, p2, ncol=2, nrow=1, common.legend = TRUE, legend="bottom")
+
+ggsave("G:/Il mio Drive/Progetto ML/distrib_strat.pdf", height=4, width=6)
+
+```
+
+### Scatter plot matrix
+
+```{r, out.width='\\textwidth'}
+ggpairs(heart[numer], aes(color=heart$death_s, alpha=0.3))
+```
+
+### Matrice di correlazione
+
+```{r}
+correl <- round(cor(heart[,numer]),2)
+library(corrplot)
+corrplot(correl, order="original", method="ellipse", tl.pos="lt", type="full", tl.col="black", tl.cex=1, tl.srt=45, addCoef.col="black", addCoefasPercent=F, sig.level=0.50, insig="n", number.cex=1)
+```
+
+
+## Test di ipotesi
+
+### Test Chi-Quadrato
+
+Utilizziamo un test Chi-Quadrato per vedere se c'è indipendenza tra la variabili categoriche e la variabile risposta.
+
+```{r}
+pvalues_chisq <- c()
+for (i in categ[-which(categ==13)]){
+  #print(c(i, names(heart)[i]))
+  #print(chisq.test(heart[,i], heart$DEATH_EVENT))
+  pvalues_chisq <- c(pvalues_chisq,chisq.test(heart[,i], heart$DEATH_EVENT)$p.value)
+}
+res_chisq <- data.frame(Categoriche = names(heart)[categ[-which(categ==13)]], 
+                        p_chisq = round(pvalues_chisq,3))
+
+res_chisq$sign1 <- ifelse(res_chisq$p_chisq > 0.1, "",
+                   ifelse(res_chisq$p_chisq > 0.05, ".",
+                   ifelse(res_chisq$p_chisq > 0.01, "*",
+                   ifelse(res_chisq$p_chisq > 0.001, "**", "***"))))
+#res_chisq
+```
+
+
+### Test esatto di Fisher
+
+Le frequenze attese per la tabella della variabile `score_control` presenta delle frequenze attese troppo piccole, quindi il test Chi-Quadrato è meno affidabile. Procediamo quindi con un test esatto di Fisher.
+
+```{r}
+tabella <- table(heart$score_control, heart$DEATH_EVENT)
+p_fisher <- fisher.test(tabella, simulate.p.value = T)$p.value
+p_fisher
+```
+
+
+### Test di Wilcoxon-Mann-Whitney
+
+Per verificare se ci sia una differenza tra le medie nel gruppo dei vivi e nel gruppo dei morti, utilizziamo il test di Wilcoxon-Mann-Whitney (test della somma dei ranghi).
+
+```{r}
+pvalues_wil <- c()
+for (i in numer){
+  pvalues_wil <- c(pvalues_wil,wilcox.test(heart[,i][heart$DEATH_EVENT==0],
+            heart[,i][heart$DEATH_EVENT==1], alternative = "two.sided")$p.value)
+}
+
+res_wil <- data.frame(sign2=NA,
+                      p_wil = round(pvalues_wil,3),
+                      Numeriche = names(heart)[numer])
+
+res_wil$sign2 <- ifelse(res_wil$p_wil > 0.1, "",
+                 ifelse(res_wil$p_wil > 0.05, ".",
+                 ifelse(res_wil$p_wil > 0.01, "*",
+                 ifelse(res_wil$p_wil > 0.001, "**", "***"))))
+#res_wil
+```
+
+
+```{r}
+tab1 <- rbind(res_chisq, c(NA, NA, ""), c(NA, NA, ""))
+tab1[6:10,4:6] <- res_wil[2:6,]
+tab1[12:13,4:6] <- res_wil[c(1,7),]
+tab1$p_chisq <- as.numeric(tab1$p_chisq)
+tab1$sign2[is.na(tab1$sign2)] <- ""
+levels(tab1$Categoriche) <- c(levels(tab1$Categoriche), "")
+tab1$Categoriche[is.na(tab1$Categoriche)] <- ""
+levels(tab1$Numeriche) <- c(levels(tab1$Numeriche), "")
+tab1$Numeriche[is.na(tab1$Numeriche)] <- ""
+tab1
+sign = c(1,5,8,9,12,13,19)
+```
+
+
+# Clustering
+
+```{r}
+heart_sign=heart[,sign]
+str(heart_sign)
+
+heart_scale=data.frame(scale(heart_sign))
+heart_scale$DEATH_EVENT=heart$DEATH_EVENT
+```
+
+## k-means
+
+```{r}
+my_best_k=function(X, R=100, ks=2:5){
+  require(cluster)
+  D=dist(X)
+  res=sapply(ks, function(k){
+    mean(sapply(1:R, function(r){
+      km.rec=kmeans(X, centers=k)
+      return(summary(silhouette(km.rec$cluster, dist=D))$avg.width)
+    }))
+  })
+  names(res)=paste('k=',ks)
+  best=which.max(res)+1
+  plot(c(0,res), type='l', main='Silhouette media per k', ylim=c(0,1), 
+       ylab='avg sil', xlab='n di cluster', lwd=1.5)
+  points(c(0,res), col='cornflowerblue', pch=20, cex=1.5)
+  abline(h=0.25, col='coral', lty='dotted')
+  abline(h=0.5, col='steelblue', lty='dotted')
+  abline(h=0.75, col='limegreen', lty='dotted')
+  return(list(results=res, best=best))
+}
+
+bk=my_best_k(X=heart_scale[,-6],R = 100,ks = 2:5)
+bk$results
+```
+
+```{r}
+pca=princomp(heart_scale[,-6])
+pca$loadings
+summary(pca)
+par(mfrow=c(2,2))
+set.seed(123)
+for(k in 2:5){
+  rec.km=kmeans(heart_scale[,-6], centers=k)
+  plot(pca$scores[,1:2], main=paste('k=',k))
+  points(pca$scores[,1:2],col=rainbow(k, alpha=.75)[rec.km$cluster], pch=16)
+}
+par(mfrow=c(1,1))
+```
+
+## Hierarchical cluster
+
+```{r}
+D=dist(heart_scale[,-6])
+metodi=c('single', 'complete', 'average', 'ward.D')
+par(mfrow=c(2,2))
+hc=lapply(metodi, function(u){
+  hc=hclust(D, method = u)
+  plot(hc, hang=-1, main=paste(u,'linkage'), cex=.6, labels=F)
+  return(hc)
+})
+par(mfrow=c(1,1))
+names(hc)=metodi
+
+hc.w=hc$ward.D
+plot(hc.w, hang=-1, labels=F, main='Dendogramma')
+rect.hclust(hc.w,k=2, border=c('red','green'))
+km.finale=kmeans(heart_scale[,-6], 2)
+hc.finale=cutree(hc.w, k=2)
+```
+
+## EM clustering
+
+```{r}
+library(EMCluster)
+
+emobj = simple.init(heart_scale,nclass=2)
+em.res=emcluster(heart_scale,emobj,assign.class = TRUE)
+print(em.res)
+
+emobj2 = init.EM(heart_scale,nclass=2)          #modo alternativo per inizializzare i valori
+em.res2=emcluster(heart_scale,emobj2,assign.class = TRUE)
+print(em.res2)
+```
+
+## DBScan
+
+```{r}
+library(dbscan)
+
+best.e=numeric()
+best.m=numeric()
+best.zero=300
+
+for ( e in seq (0.1, 1.5, by=0.1) ) {
+  for ( m in seq (2, 10, by=1) ) {
+    dbscan.res=dbscan(heart_scale[,-6],eps=e,minPts = m)
+    if(max(dbscan.res$cluster)!=2) next
+    zeros=sum(dbscan.res$cluster==0)
+    if(zeros<best.zero){
+      best.zero=zeros
+      best.e=e
+      best.m=m
+    }
+  }
+}
+  
+best.e  
+best.m
+best.zero
+
+best.dbscan=dbscan(heart_scale[,-6],eps=best.e,minPts = best.m)
+table(best.dbscan$cluster)
+
+table(best.dbscan$cluster,heart$DEATH_EVENT)
+```
+
+## Validazione esterna del clustering
+
+```{r}
+our_entropy=function (x) {
+  ifelse(x==0, return(0), return(sum(x*log(x))))
+}
+
+cluster_val = function (matriceconfusione) {
+  purity1=sum(apply(matriceconfusione,1,max))/sum(matriceconfusione)
+  purity2=sum(apply(matriceconfusione,2,max))/sum(matriceconfusione)
+  purity=mean(c(purity1,purity2))
+  
+  gini.class=1-apply(prop.table(matriceconfusione,1),1,function (x) sum(x^2))
+  tot.col=apply(matriceconfusione,1,sum)
+  gini=sum(gini.class*tot.col)/sum(matriceconfusione)
+  
+  entropy.class=-apply(prop.table(matriceconfusione,1),1,our_entropy)
+  entropy=sum(entropy.class*tot.col)/sum(matriceconfusione)
+  
+  return(list(purity=purity,gini=gini,entropy=entropy))
+}
+
+conf.km=table(km.finale$cluster,heart$DEATH_EVENT)
+
+conf.hc=table(hc.finale,heart$DEATH_EVENT)
+
+conf.em=table(em.res$class,heart$DEATH_EVENT)
+
+conf.em2=table(em.res2$class,heart$DEATH_EVENT)
+
+conf.db=table(best.dbscan$cluster,heart$DEATH_EVENT)
+
+valutazioni=rbind(as.data.frame(cluster_val(conf.km)),
+                  as.data.frame(cluster_val(conf.hc)),
+                  as.data.frame(cluster_val(conf.em)),
+                  as.data.frame(cluster_val(conf.em2)),
+                  as.data.frame(cluster_val(conf.db)))
+rownames(valutazioni)=c('k-means','hierarchical','EM_simple','EM_init','DBscan')
+valutazioni
+```
+
+
+## Grafico EM cluster su PCA 2D
+
+```{r}
+ds_pca2 <- as.data.frame(pca$scores[,1:2])
+#View(ds_pca)
+ds_pca2$clust_eminit <- as.factor(em.res2$class)
+
+ggplot(ds_pca2, aes(Comp.1, Comp.2, col=clust_eminit)) +
+  geom_point(show.legend = F)
+
+ggsave("G:/Il mio Drive/Progetto ML/EM_clust_2CP.pdf", height=4, width=6)
+```
+
+## Grafico EM cluster su PCA 3D
+
+```{r}
+# library(rgl)
+# ds_pca3 <- as.data.frame(pca$scores[,1:3])
+# ds_pca3$clust_eminit <- as.factor(em.res2$class)
+# plot3d(ds_pca3, pch=20, col=ds_pca3$clust_eminit, size=5) #-- plot 3D dinamico
+```
+
+
+
+# Modelli
+
+```{r}
+#divido il dataset in train e test (Hold Out)
+
+library(caret)
+
+set.seed(1)
+trainIndex <- createDataPartition(heart_scale$DEATH_EVENT, p = .75,
+                                  list = FALSE,
+                                  times = 1)
+train_set=heart_scale[(trainIndex),]
+table(train_set$DEATH_EVENT)
+
+test_heart_scale=heart_scale[-(trainIndex),]
+table(test_heart_scale$DEATH_EVENT)
+
+
+
+# FOLDS
+k=10
+folds <- createFolds(train_set$DEATH_EVENT, k = k)
+
+our.recall = function (matriceconfusione) {
+  return(matriceconfusione[2,2]/(matriceconfusione[2,2]+matriceconfusione[1,2])
+  )
+}
+
+our.negative.predicted.value = function (matriceconfusione) {
+  return(matriceconfusione[1,1]/(matriceconfusione[1,1]+matriceconfusione[1,2])
+  )
+}
+
+our.precision = function (matriceconfusione) {
+  return(matriceconfusione[2,2]/(matriceconfusione[2,2]+matriceconfusione[2,1])
+  )
+}
+
+our.mean= function (dati){
+  return(weighted.mean(x=dati,w=c(0.5,0.4,0.1)))
+}
+```
+
+
+## Regressione logistica
+
+```{r}
+
+cm1=matrix(0,2,2)
+
+for (i in 1:length(folds)){
+  dati.train.temp = train_set[-folds[[i]],]
+  dati.val.temp = train_set[folds[[i]],]  
+
+  model <- glm(DEATH_EVENT~.,
+               family = binomial(link = 'logit'),
+               data = dati.train.temp)
+
+  prev=predict.glm(model,newdata = dati.val.temp, type = 'response')
+  prev=round(prev)
+
+  cm=table(prev,dati.val.temp$DEATH_EVENT)
+  cm1=cm1+cm
+}
+
+cm1
+recall.logit <- as.numeric(our.recall(cm1))
+npv.logit <- as.numeric(our.negative.predicted.value(cm1))
+precision.logit <- as.numeric(our.precision(cm1))
+media <- our.mean(c(recall.logit,npv.logit,precision.logit))
+miglior.logistic.reg <- t(c(rep('-',3),recall.logit,npv.logit,precision.logit,media))
+```
+
+## k-Nearest Neighbor
+
+```{r}
+library(class)
+library(e1071)
+set.seed(1)
+
+k.min = 1
+k.max = round(sqrt(nrow(train_set)))
+kappas = k.min:k.max
+finals = k.min:k.max
+results = matrix(0,length(kappas),3)
+
+for (j in kappas){
+  cm1 = matrix(0,2,2)
+  
+for (i in 1:length(folds)){
+  
+    dati.train.temp = train_set[-folds[[i]],]
+    dati.val.temp = train_set[folds[[i]],]    
+    
+    previsioni = knn(train=dati.train.temp, test = dati.val.temp, cl = as.factor(dati.train.temp$DEATH_EVENT), k = j,)
+    
+    y.temp <- dati.val.temp[,'DEATH_EVENT']
+    
+    cm=table(previsioni, y.temp)
+    cm1 = cm1+cm
+    
+    }
+  
+    recall.temp <- as.numeric(our.recall(cm1))
+  
+    npv.temp <- as.numeric(our.negative.predicted.value(cm1))
+  
+    prec.temp <- as.numeric(our.precision(cm1))
+  
+    results[j,] <- c(recall.temp,npv.temp,prec.temp)
+}
+
+results
+
+media=apply(results,1,our.mean)
+results=cbind(results,media)
+best.k=which.max(media)
+
+results
+miglior.knn=t(c((paste('k =',best.k)),'-','-',results[best.k,]))
+```
+
+```{r}
+results_df <- data.frame(k = rep(1:15,4),
+                         Metrica = c(rep("Recall", 15),
+                                     rep("NPV", 15),
+                                     rep("Precision", 15),
+                                     rep("Metrica pesata", 15)),
+                         Valore = c(results[,1], results[,2], results[,3], results[,4]))
+results_df
+
+
+ggplot(data = results_df) +
+  geom_line(aes(x=k, y=Valore, color = Metrica), size=1, linetype=2) +
+  geom_line(data=filter(results_df, Metrica=="Metrica pesata"), aes(x=k, y=Valore), size=1) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_color_manual(values = c("NPV" = "green3",
+                               "Precision" = "darkolivegreen3",
+                               "Recall" = "darkcyan",
+                               "Metrica pesata" = "black")) +
+  geom_vline(aes(xintercept=best.k), col="red", size=1) +
+  theme(legend.position = "bottom")
+
+ggsave("G:/Il mio Drive/Progetto ML/k-NN.pdf", height=4, width=6)
+
+```
+
+## SVM lineare
+
+```{r}
+ker <- 'linear'
+
+C <- seq(0.01,1, by=0.01)
+
+griglia <- expand.grid(C, ker)
+
+results <- data.frame(griglia, gamma=0, our.rec=0, our.npv=0, our.prec=0)
+
+colnames(results) <- c('C', 'kernel', 'gamma', 'our.rec', 'our.npv', 'our.prec')
+
+results[,3]='-'
+
+for(j in 1:nrow(griglia)){
+  
+  cm1=matrix(0,2,2)
+  
+  for(i in 1:length(folds)){
+    
+    dati.train.temp = train_set[-folds[[i]],]
+    
+    dati.val.temp = train_set[folds[[i]],]  
+    
+    mod.temp <- svm(DEATH_EVENT~., data = dati.train.temp, scale=F, type='C-classification',
+                    kernel = griglia[j, 2],
+                    cost = griglia[j, 1],
+    )
+    previsioni <- predict(mod.temp, newdata=dati.val.temp)
+    
+    y.temp <- dati.val.temp[,'DEATH_EVENT']
+    
+    cm=table(previsioni, y.temp)
+    
+    cm1=cm1+cm
+    
+  }
+  
+  results[j,4] <- as.numeric(our.recall(cm1))
+  results[j,5] <- as.numeric(our.negative.predicted.value(cm1))
+  results[j,6] <- as.numeric(our.precision(cm1))
+}
+
+media=apply(results[,c(4:6)],1,our.mean)
+
+results=cbind(results,media)
+
+best.svm=which.max(results[,7])
+
+miglior.svm.lineare=as.matrix((results[best.svm,]))
+```
+
+## SVM kernel
+
+```{r}
+set.seed(1)
+
+C <- seq(0.01,1, by=0.01)
+
+ker <- c('polynomial', 'radial', 'sigmoid')
+
+gamma <- seq(0.001,0.1,by=0.001)
+
+griglia <- expand.grid(C, ker, gamma)
+
+results <- data.frame(griglia, our.rec=0, our.npv=0, our.prec=0)
+
+colnames(results) <- c('C', 'kernel', 'gamma', 'our.rec', 'our.npv', 'our.prec')
+
+for(j in 1:nrow(griglia)){
+  
+  cm1=matrix(0,2,2)
+  
+  for(i in 1:length(folds)){
+    
+    dati.train.temp = train_set[-folds[[i]],]
+    
+    dati.val.temp = train_set[folds[[i]],]  
+    
+    mod.temp <- svm(DEATH_EVENT~., data = dati.train.temp, scale=F, type='C-classification',
+                    kernel = griglia[j, 2],
+                    cost = griglia[j, 1],
+                    gamma = griglia[j, 3]
+    )
+    previsioni <- predict(mod.temp, newdata=dati.val.temp)
+    
+    y.temp <- dati.val.temp[,'DEATH_EVENT']
+    
+    cm=table(previsioni, y.temp)
+    
+    cm1=cm1+cm
+    
+  }
+  
+  results[j,4] <- as.numeric(our.recall(cm1))
+  results[j,5] <- as.numeric(our.negative.predicted.value(cm1))
+  results[j,6] <- as.numeric(our.precision(cm1))
+}
+
+media=apply(results[,c(4:6)],1,our.mean)
+
+results=cbind(results,media)
+
+best.svm=which.max(results[,7])
+
+miglior.svm.kernel = as.matrix(results[best.svm,])
+```
+
+## Random forest
+
+```{r}
+set.seed(1)
+library(randomForest)
+
+tree=seq(250,2500,by=250)
+vars=c(1:(ncol(heart_scale)-1))
+
+griglia=expand.grid(tree,vars)
+
+names(griglia) = c('alberi','mtry')
+
+results <- data.frame(griglia, hyper3=0, our.rec=0, our.npv=0, our.prec=0)
+
+colnames(results) <- c('alberi', 'mtry','hyper3', 'our.rec', 'our.npv', 'our.prec')
+
+results[,3]='-'
+
+for (j in 1:nrow(griglia)){
+  
+  cm1=matrix(0,2,2)
+  
+  for (i in 1:length(folds)){
+
+  dati.train.temp = train_set[-folds[[i]],]
+
+  dati.val.temp = train_set[folds[[i]],]  
+
+  rf = randomForest(x=dati.train.temp[,-6],
+                  y = as.factor(dati.train.temp$DEATH_EVENT),
+                  xtest = dati.val.temp[,-6],
+                  ytest = as.factor(dati.val.temp$DEATH_EVENT),
+                  ntree = griglia[j,1],
+                  mtry = griglia[j,2],
+                  replace = T,
+  )
+
+  cm=as.matrix(rf$test$confusion)
+  cm=cm[1:2,1:2]
+  cm1=cm1+cm
+  
+  }
+  
+  results[j,4] <- as.numeric(our.recall(cm1))
+  results[j,5] <- as.numeric(our.negative.predicted.value(cm1))
+  results[j,6] <- as.numeric(our.precision(cm1))
+}
+results
+
+media=apply(results[,c(4:6)],1,our.mean)
+
+results=cbind(results,media)
+
+best.rf=which.max(results[,7])
+
+miglior.rf.small=as.matrix(results[best.rf,])
+
+
+# vista la natura della random forest, potrebbe essere opportuno considerare tutte
+# le variabili del dataset
+
+heart.full=heart[,1:19]
+heart.full=data.frame(scale(heart.full))
+heart.full[,13]=heart[,13]
+
+tree=seq(250,2500,by=250)
+vars=c(1:(ncol(heart.full)-1))
+
+griglia=expand.grid(tree,vars)
+
+names(griglia) = c('alberi','mtry')
+
+results <- data.frame(griglia, hyper3=0, our.rec=0, our.npv=0, our.prec=0)
+
+colnames(results) <- c('alberi', 'mtry','hyper3', 'our.rec', 'our.npv', 'our.prec')
+
+results[,3]='-'
+
+train_set=heart.full[(trainIndex),]
+table(train_set$DEATH_EVENT)
+
+test_heart_scale=heart.full[-(trainIndex),]
+table(test_heart_scale$DEATH_EVENT)
+
+for (j in 1:nrow(griglia)){
+  
+  cm1=matrix(0,2,2)
+  
+  for (i in 1:length(folds)){
+    
+    dati.train.temp = train_set[-folds[[i]],]
+    
+    dati.val.temp = train_set[folds[[i]],]  
+    
+    rf = randomForest(x=dati.train.temp[,-13],
+                      y = as.factor(dati.train.temp$DEATH_EVENT),
+                      xtest = dati.val.temp[,-13],
+                      ytest = as.factor(dati.val.temp$DEATH_EVENT),
+                      ntree = griglia[j,1],
+                      mtry = griglia[j,2],
+                      replace = T
+    )
+    
+    cm=as.matrix(rf$test$confusion)
+    cm=cm[1:2,1:2]
+    cm1=cm1+cm
+    
+  }
+  
+  results[j,4] <- as.numeric(our.recall(cm1))
+  results[j,5] <- as.numeric(our.negative.predicted.value(cm1))
+  results[j,6] <- as.numeric(our.precision(cm1))
+}
+
+media=apply(results[,c(4:6)],1,our.mean)
+
+results = cbind(results,media)
+
+best.rf = which.max(results[,7])
+
+miglior.rf.full = as.matrix(results[best.rf,])
+```
+
+
+## Reti neurali
+
+```{r}
+
+library(tensorflow)
+library(keras)
+heart_nn=as.matrix(heart[,1:19])
+dimnames(heart_nn)=NULL
+
+#Creo Split TRAIN-TEST DIVIDENDO ESPLICATIVE E RISPOSTA USANDO I TRAIN INDEX USATI PER SVM
+
+train_nn=(heart_nn[(trainIndex),-c(13)])
+
+train_nn=scale(train_nn)
+
+train_target=heart_nn[(trainIndex),13]
+
+test_nn=(heart_nn[-(trainIndex),-c(13)])
+
+test_nn=scale(test_nn)
+
+test_target=heart_nn[-(trainIndex),13]
+
+test_target
+
+train_labels=to_categorical(train_target)
+test_labels=to_categorical(test_target)
+
+table(train_target)
+table(test_target)
+
+print(train_labels)
+print(test_labels)
+
+
+cms=list()
+
+for (i in 1:length(folds)){
+
+model <- keras_model_sequential() %>%
+  layer_dense(units = 8,input_shape = ncol(train_nn), activation = 'relu', kernel_regularizer =regularizer_l2(l=0.01)) %>%
+  layer_dense(units = 4, activation = 'softsign', kernel_regularizer =regularizer_l2(l=0.01)) %>%
+  layer_dense(units = 4, activation = 'tanh', kernel_regularizer =regularizer_l2(l=0.01)) %>%
+  layer_dense(units = 2, activation = 'sigmoid')
+
+model %>% compile(
+  loss = 'categorical_crossentropy',
+  optimizer = optimizer_rmsprop(lr = 1e-3),
+  metrics = c("Recall","Precision"),
+)
+
+early = callback_early_stopping(monitor='val_loss', patience=20, verbose=1)
+lr_decay = callback_reduce_lr_on_plateau(monitor='val_loss', patience=10, verbose=1, factor=0.5, min_lr=1e-6)
+
+  dati.train.temp = train_nn[-folds[[i]],]
+  tr.target=train_target[-folds[[i]]]
+  dati.val.temp = train_nn[folds[[i]],]  
+  val.target=train_target[folds[[i]]]
+  tr.labels=to_categorical(tr.target)
+  val.labels=to_categorical(val.target)
+  
+  history <- model %>% fit(
+  dati.train.temp,
+  tr.labels,
+  epochs = 200,
+  batch_size = 32,
+  validation_data=list(dati.val.temp,val.labels),
+  callbacks = list(early,lr_decay)
+)
+
+classes <- model %>% predict_classes(dati.val.temp, batch_size = 15)
+
+classes
+
+# Confusion matrix
+cm=(table(val.target, classes))  
+cms[[i]]=cm
+
+}
+
+attenzione=vector()
+cm.nn=matrix(0,2,2)
+for (i in 1:length(folds)){
+  if(ncol(as.matrix(cms[[i]]))==2 && nrow(as.matrix(cms[[i]]))==2){
+    cm.nn=cm.nn+as.matrix(cms[[i]])
+  } else{attenzione=c(attenzione,i)}
+}
+
+cm.nn
+
+ifelse(length(attenzione)==0, print('tutto bene'),print('non ho sommato tutte le cm'))
+
+recall.nn=as.numeric(our.recall(cm.nn))
+npv.nn=as.numeric(our.negative.predicted.value(cm.nn))
+precision.nn=as.numeric(our.precision(cm.nn))
+media=our.mean(c(recall.nn,npv.nn,precision.nn))
+miglior.nn=t(c((paste("lr =", 0.001)),(paste("hidden layers =", 2)),(paste("activation function = relu,softsign,tanh,sigmoid")),recall.nn,npv.nn,precision.nn,media))
+
+```
+
+
+# Confronto modelli
+
+```{r}
+risultati.finali=rbind(miglior.logistic.reg,miglior.knn,miglior.svm.lineare, miglior.svm.kernel,miglior.rf.small,miglior.rf.full,miglior.nn)
+
+rownames (risultati.finali)=c('logit','knn','svm linear','svm kernel','rf','rf.full','nn')
+colnames(risultati.finali)=c('hyper1','hyper2','hyper3','recall', 'npv','precision','metrica pesata')
+
+risultati.finali[,4:7]=round(as.numeric(risultati.finali[,4:7]),digits = 4)
+
+print(risultati.finali)
+```
+
+
+```{r}
+risultati.finali2 <- data.frame(Modello = c('Logit','k-NN','SVM linear','SVM sigmoid','RF','RF full','NN'),
+                                Metrica = as.factor(c(rep("Recall", nrow(risultati.finali)),
+                                                      rep("NPV", nrow(risultati.finali)),
+                                                      rep("Precision", nrow(risultati.finali)),
+                                                      rep("Metrica pesata", nrow(risultati.finali)))),
+                                Valore = as.numeric(c(risultati.finali[,4],
+                                                      risultati.finali[,5],
+                                                      risultati.finali[,6],
+                                                      risultati.finali[,7]))
+                                )
+```
+
+```{r}
+ggplot(filter(risultati.finali2, Metrica!="Metrica pesata")) + 
+  geom_bar(aes(x = Modello, y=Valore, fill=Metrica), stat="identity", position = "dodge", width=0.5) +
+  geom_errorbar(data=filter(risultati.finali2, Metrica=="Metrica pesata"),
+                aes(x=Modello, y=Valore, ymin=Valore, ymax=Valore), size=1,
+                width = 0.5) +
+  scale_fill_manual(values = c("NPV" = "green3",
+                               "Precision" = "darkolivegreen2",
+                               "Recall" = "darkcyan")) +
+  theme(axis.text.x=element_text(size=7))
+
+ggsave("G:/Il mio Drive/Progetto ML/confronto modelli.pdf", height=4, width=6)
+
+```
+
+
+
+# Retrain miglior modello
+
+```{r}
+best.k
+traindata = heart_scale[(trainIndex),]
+testdata = heart_scale[-(trainIndex),]
+previsioni.knn = knn(train=traindata, test = testdata, cl = as.factor(traindata$DEATH_EVENT), k = best.k)
+
+y.temp <- testdata[,'DEATH_EVENT']
+
+cm1=table(previsioni.knn, y.temp)
+cm1
+recall.test.knn <- as.numeric(our.recall(cm1))
+recall.test.knn
+npv.test.knn <- as.numeric(our.negative.predicted.value(cm1))
+npv.test.knn
+prec.test.knn <- as.numeric(our.precision(cm1))
+prec.test.knn
+metriche.test.knn=c(recall.test.knn,npv.test.knn,prec.test.knn)
+metrica.finale.knn=our.mean(metriche.test.knn)
+metriche.test.knn=c(metriche.test.knn,metrica.finale.knn)
+
+print(metriche.test.knn)
+
+#previsioni.knn=as.numeric(previsioni.knn)-1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
